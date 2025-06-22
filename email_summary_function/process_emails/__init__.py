@@ -122,13 +122,18 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                     else:
                         sender_display = sender.title() if sender else 'Unknown Sender'
                         sender_email_display = sender_email if sender_email else 'unknown@email.com'
+                      # Create smart preview with read more functionality
+                    full_preview = email.get('bodyPreview', '')
+                    short_preview = full_preview[:100] + '...' if len(full_preview) > 100 else full_preview
                     
                     email_data = {
                         'subject': email.get('subject', 'No Subject'),
                         'sender': sender_display,
                         'sender_email': sender_email_display,
                         'received': received_date_str,
-                        'preview': email.get('bodyPreview', '')[:150] + '...' if len(email.get('bodyPreview', '')) > 150 else email.get('bodyPreview', ''),
+                        'preview_short': short_preview,
+                        'preview_full': full_preview,
+                        'has_long_preview': len(full_preview) > 100,
                         'is_from_sahithi': is_from_sahithi,
                         'nav_link': nav_link
                     }
@@ -175,25 +180,41 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                                             name = email_addr.get('name', '')
                                             if name:
                                                 recipient_names.append(name)
+                              # Create smart preview with read more functionality
+                            full_preview = email.get('bodyPreview', '')
+                            short_preview = full_preview[:80] + '...' if len(full_preview) > 80 else full_preview
                             
                             old_sent_emails.append({
                                 'subject': subject,
                                 'recipients': ', '.join(recipient_names) if recipient_names else 'Unknown',
                                 'sent': sent_date_str,
-                                'preview': email.get('bodyPreview', '')[:100] + '...' if len(email.get('bodyPreview', '')) > 100 else email.get('bodyPreview', '')
+                                'preview_short': short_preview,
+                                'preview_full': full_preview,
+                                'has_long_preview': len(full_preview) > 80
                             })
                     except Exception as date_error:
                         logging.warning(f"Error parsing sent date {sent_date_str}: {date_error}")
                         continue
             except Exception as email_error:
                 logging.warning(f"Error processing sent email: {email_error}")
-                continue
-          # Format HTML table with all sections
-        html_report = f"""        <!DOCTYPE html>
+                continue        # Helper function to create preview cell with read more functionality
+        def create_preview_cell(email_data, index):
+            if not email_data.get('has_long_preview', False):
+                return f'<td class="preview-cell">{email_data.get("preview_short", "")}</td>'
+            
+            return f'''<td class="preview-cell">
+                <div class="preview-short" id="short-{index}">{email_data.get("preview_short", "")}</div>
+                <div class="preview-full" id="full-{index}" style="display: none;">{email_data.get("preview_full", "")}</div>
+                <span class="read-more-btn" onclick="togglePreview(this, '{index}')">Read More</span>
+            </td>'''
+        
+        # Format HTML table with all sections
+        html_report = f"""<!DOCTYPE html>
         <html lang="en">
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <meta name="color-scheme" content="light dark">
             <title>Daily Email Summary Report</title>
             <style>
                 * {{
@@ -203,98 +224,187 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 }}
                 
                 body {{
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
                     line-height: 1.6;
-                    color: #333;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: #1a1a1a;
+                    background: #ffffff;
                     min-height: 100vh;
                     padding: 20px;
+                    transition: all 0.3s ease;
+                }}
+                
+                /* Dark mode styles */
+                @media (prefers-color-scheme: dark) {{
+                    body {{
+                        color: #e5e5e5;
+                        background: #0d1117;
+                    }}
+                    
+                    .container {{
+                        background: #161b22 !important;
+                        border: 1px solid #30363d;
+                    }}
+                    
+                    .summary {{
+                        background: #21262d !important;
+                        border-left-color: #58a6ff !important;
+                    }}
+                    
+                    .summary-item {{
+                        background: rgba(56, 139, 253, 0.1) !important;
+                        border: 1px solid #30363d;
+                    }}
+                    
+                    .summary-number {{
+                        color: #f0f6fc !important;
+                    }}
+                    
+                    .summary-label {{
+                        color: #8b949e !important;
+                    }}
+                    
+                    h2 {{
+                        color: #f0f6fc !important;
+                        border-bottom-color: #58a6ff !important;
+                    }}
+                    
+                    th {{
+                        background: #21262d !important;
+                        color: #f0f6fc !important;
+                        border-bottom: 1px solid #30363d;
+                    }}
+                    
+                    td {{
+                        border-bottom-color: #30363d !important;
+                    }}
+                    
+                    table {{
+                        background: #0d1117 !important;
+                        border: 1px solid #30363d;
+                    }}
+                    
+                    .urgent {{
+                        background: rgba(248, 81, 73, 0.1) !important;
+                        border-left-color: #f85149 !important;
+                    }}
+                    
+                    .sahithi-row {{
+                        background: rgba(255, 191, 0, 0.1) !important;
+                        border-left-color: #ffbf00 !important;
+                    }}
+                    
+                    .subject-cell {{
+                        color: #f0f6fc !important;
+                    }}
+                    
+                    .sender-cell {{
+                        color: #e6edf3 !important;
+                    }}
+                    
+                    .email-cell, .preview-cell {{
+                        color: #8b949e !important;
+                    }}
+                    
+                    .date-cell {{
+                        color: #7d8590 !important;
+                    }}
+                    
+                    .no-emails {{
+                        background: #21262d !important;
+                        color: #8b949e !important;
+                        border: 1px solid #30363d;
+                    }}
                 }}
                 
                 .container {{
-                    max-width: 1200px;
+                    max-width: 1400px;
                     margin: 0 auto;
                     background: #ffffff;
-                    border-radius: 15px;
-                    box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                    border-radius: 12px;
+                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
                     overflow: hidden;
+                    border: 1px solid #f3f4f6;
                 }}
                 
                 .header {{
-                    background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
-                    color: white;
-                    padding: 30px;
+                    background: #1a1a1a;
+                    color: #ffffff;
+                    padding: 32px;
                     text-align: center;
+                    border-bottom: 1px solid #374151;
                 }}
                 
                 .header h1 {{
-                    font-size: 2.5em;
-                    margin-bottom: 10px;
-                    font-weight: 300;
+                    font-size: 2.25rem;
+                    margin-bottom: 8px;
+                    font-weight: 700;
+                    letter-spacing: -0.025em;
                 }}
                 
                 .header .subtitle {{
-                    font-size: 1.1em;
-                    opacity: 0.8;
+                    font-size: 1rem;
+                    opacity: 0.85;
+                    font-weight: 400;
                 }}
                 
                 .content {{
-                    padding: 30px;
+                    padding: 32px;
                 }}
                 
                 .summary {{
-                    background: linear-gradient(135deg, #e8f4f8 0%, #d6eaf8 100%);
-                    padding: 25px;
-                    border-radius: 10px;
-                    margin-bottom: 30px;
-                    border-left: 5px solid #3498db;
-                    box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+                    background: #f8fafc;
+                    padding: 24px;
+                    border-radius: 8px;
+                    margin-bottom: 32px;
+                    border-left: 4px solid #3b82f6;
+                    border: 1px solid #e2e8f0;
+                }}
+                
+                .summary h3 {{
+                    color: #1e293b;
+                    margin-bottom: 16px;
+                    font-weight: 600;
+                    font-size: 1.125rem;
                 }}
                 
                 .summary-grid {{
                     display: grid;
                     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                    gap: 20px;
-                    margin-top: 15px;
+                    gap: 16px;
+                    margin-top: 16px;
                 }}
                 
                 .summary-item {{
                     text-align: center;
-                    padding: 15px;
-                    background: rgba(255,255,255,0.7);
-                    border-radius: 8px;
+                    padding: 16px;
+                    background: rgba(59, 130, 246, 0.05);
+                    border-radius: 6px;
+                    border: 1px solid #e2e8f0;
                 }}
                 
                 .summary-number {{
-                    font-size: 2em;
-                    font-weight: bold;
-                    color: #2c3e50;
+                    font-size: 1.875rem;
+                    font-weight: 700;
+                    color: #1e293b;
                     display: block;
+                    line-height: 1;
                 }}
                 
                 .summary-label {{
-                    font-size: 0.9em;
-                    color: #7f8c8d;
-                    margin-top: 5px;
+                    font-size: 0.875rem;
+                    color: #64748b;
+                    margin-top: 4px;
+                    font-weight: 500;
                 }}
                 
                 h2 {{
-                    color: #2c3e50;
-                    font-size: 1.8em;
-                    margin: 30px 0 20px 0;
-                    padding-bottom: 10px;
-                    border-bottom: 3px solid #3498db;
-                    position: relative;
-                }}
-                
-                h2::before {{
-                    content: '';
-                    position: absolute;
-                    bottom: -3px;
-                    left: 0;
-                    width: 60px;
-                    height: 3px;
-                    background: #e74c3c;
+                    color: #1e293b;
+                    font-size: 1.5rem;
+                    margin: 32px 0 16px 0;
+                    padding-bottom: 8px;
+                    border-bottom: 2px solid #3b82f6;
+                    font-weight: 600;
+                    letter-spacing: -0.025em;
                 }}
                 
                 .section {{
@@ -304,137 +414,229 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 table {{
                     width: 100%;
                     border-collapse: collapse;
-                    margin: 20px 0;
-                    background: white;
-                    border-radius: 10px;
+                    margin: 16px 0;
+                    background: #ffffff;
+                    border-radius: 8px;
                     overflow: hidden;
-                    box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+                    border: 1px solid #e2e8f0;
                 }}
                 
                 th {{
-                    background: linear-gradient(135deg, #34495e 0%, #2c3e50 100%);
-                    color: white;
+                    background: #1e293b;
+                    color: #ffffff;
                     font-weight: 600;
-                    padding: 18px 15px;
+                    padding: 16px;
                     text-align: left;
-                    font-size: 0.95em;
-                    letter-spacing: 0.5px;
+                    font-size: 0.875rem;
+                    letter-spacing: 0.025em;
+                    text-transform: uppercase;
                 }}
                 
                 td {{
-                    padding: 15px;
-                    border-bottom: 1px solid #ecf0f1;
+                    padding: 16px;
+                    border-bottom: 1px solid #f1f5f9;
                     vertical-align: top;
                 }}
-                  tr:hover {{
-                    transform: translateY(-1px);
-                    transition: all 0.2s ease;
+                
+                tr:hover {{
+                    background: #f8fafc;
+                    transition: background-color 0.15s ease;
                 }}
                 
                 .urgent {{
-                    background: linear-gradient(135deg, #ffebee 0%, #fce4ec 100%);
-                    border-left: 5px solid #e74c3c;
+                    background: #fef2f2;
+                    border-left: 4px solid #ef4444;
                     padding: 20px;
-                    border-radius: 10px;
+                    border-radius: 8px;
                     margin: 20px 0;
+                    border: 1px solid #fecaca;
                 }}
                 
                 .sahithi-row {{
-                    background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
-                    border-left: 4px solid #ff9800;
+                    background: #fffbeb;
+                    border-left: 4px solid #f59e0b;
                 }}
                 
                 .email-link {{
                     display: inline-block;
-                    background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
-                    color: white;
-                    padding: 8px 15px;
+                    background: #1e293b;
+                    color: #ffffff;
+                    padding: 8px 16px;
                     text-decoration: none;
-                    border-radius: 25px;
-                    font-size: 0.85em;
+                    border-radius: 6px;
+                    font-size: 0.875rem;
                     font-weight: 500;
-                    transition: all 0.3s ease;
-                    box-shadow: 0 3px 10px rgba(52, 152, 219, 0.3);
+                    transition: all 0.2s ease;
+                    border: 1px solid transparent;
                 }}
                 
                 .email-link:hover {{
-                    transform: translateY(-2px);
-                    box-shadow: 0 5px 15px rgba(52, 152, 219, 0.4);
+                    background: #334155;
+                    transform: translateY(-1px);
+                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
                     text-decoration: none;
-                    color: white;
+                    color: #ffffff;
                 }}
                 
                 .urgent-link {{
-                    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
-                    box-shadow: 0 3px 10px rgba(231, 76, 60, 0.3);
+                    background: #dc2626;
+                    color: #ffffff;
                 }}
                 
                 .urgent-link:hover {{
-                    box-shadow: 0 5px 15px rgba(231, 76, 60, 0.4);
+                    background: #b91c1c;
                 }}
                 
                 .subject-cell {{
                     font-weight: 600;
-                    color: #2c3e50;
+                    color: #1e293b;
                     max-width: 300px;
                 }}
                 
                 .sender-cell {{
                     font-weight: 500;
-                    color: #34495e;
+                    color: #374151;
                 }}
                 
                 .email-cell {{
-                    font-size: 0.9em;
-                    color: #7f8c8d;
+                    font-size: 0.875rem;
+                    color: #6b7280;
+                    font-family: ui-monospace, SFMono-Regular, 'SF Mono', monospace;
                 }}
                 
                 .date-cell {{
-                    font-size: 0.9em;
-                    color: #95a5a6;
+                    font-size: 0.875rem;
+                    color: #9ca3af;
                     white-space: nowrap;
                 }}
                 
                 .preview-cell {{
-                    font-size: 0.9em;
-                    color: #7f8c8d;
-                    line-height: 1.4;
-                    max-width: 250px;
+                    font-size: 0.875rem;
+                    color: #6b7280;
+                    line-height: 1.5;
+                    max-width: 300px;
+                    position: relative;
+                }}
+                
+                .preview-text {{
+                    display: block;
+                }}
+                
+                .preview-short {{
+                    display: block;
+                }}
+                
+                .preview-full {{
+                    display: none;
+                }}
+                
+                .read-more-btn {{
+                    color: #3b82f6;
+                    cursor: pointer;
+                    font-weight: 500;
+                    text-decoration: underline;
+                    font-size: 0.75rem;
+                    margin-top: 4px;
+                    display: inline-block;
+                }}
+                
+                .read-more-btn:hover {{
+                    color: #2563eb;
                 }}
                 
                 .no-emails {{
                     text-align: center;
                     padding: 40px;
-                    color: #7f8c8d;
+                    color: #6b7280;
                     font-style: italic;
-                    background: #f8f9fa;
-                    border-radius: 10px;
+                    background: #f9fafb;
+                    border-radius: 8px;
                     margin: 20px 0;
+                    border: 1px solid #e5e7eb;
                 }}
                 
                 @media (max-width: 768px) {{
+                    body {{
+                        padding: 10px;
+                    }}
+                    
                     .container {{
-                        margin: 10px;
-                        border-radius: 10px;
+                        margin: 0;
+                        border-radius: 8px;
+                    }}
+                    
+                    .header {{
+                        padding: 24px 16px;
                     }}
                     
                     .header h1 {{
-                        font-size: 2em;
+                        font-size: 1.875rem;
                     }}
                     
                     .content {{
-                        padding: 20px;
+                        padding: 20px 16px;
+                    }}
+                    
+                    .summary {{
+                        padding: 16px;
+                    }}
+                    
+                    .summary-grid {{
+                        grid-template-columns: 1fr;
+                        gap: 12px;
                     }}
                     
                     table {{
-                        font-size: 0.9em;
+                        font-size: 0.875rem;
                     }}
                     
                     th, td {{
-                        padding: 10px 8px;
+                        padding: 12px 8px;
+                    }}
+                    
+                    .preview-cell {{
+                        max-width: 200px;
+                    }}
+                    
+                    h2 {{
+                        font-size: 1.25rem;
+                        margin: 24px 0 12px 0;
                     }}
                 }}
-            </style>
+                
+                /* Print styles */
+                @media print {{
+                    body {{
+                        background: white;
+                        color: black;
+                    }}
+                    
+                    .container {{
+                        box-shadow: none;
+                        border: 1px solid #ccc;
+                    }}
+                    
+                    .email-link {{
+                        background: #333 !important;
+                        -webkit-print-color-adjust: exact;
+                    }}
+                }}
+            </style>            <script>
+                function togglePreview(button, index) {{
+                    const shortDiv = document.getElementById('short-' + index);
+                    const fullDiv = document.getElementById('full-' + index);
+                    
+                    if (fullDiv.style.display === 'none' || !fullDiv.style.display) {{
+                        shortDiv.style.display = 'none';
+                        fullDiv.style.display = 'block';
+                        button.textContent = 'Read Less';
+                    }} else {{
+                        shortDiv.style.display = 'block';
+                        fullDiv.style.display = 'none';
+                        button.textContent = 'Read More';
+                    }}
+                }}
+            </script>
         </head>
         <body>
             <div class="container">
@@ -476,17 +678,17 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                     <th>Received</th>
                     <th>Preview</th>
                     <th>Open Email</th>
-                </tr>
-            """
-            for email in sahithi_emails_needing_reply:
+                </tr>            """
+            for i, email in enumerate(sahithi_emails_needing_reply):
                 open_link = f'<a href="{email["nav_link"]}" target="_blank" class="email-link urgent-link">Open Email</a>' if email.get("nav_link") else "N/A"
+                preview_cell = create_preview_cell(email, f"urgent-{i}")
                 html_report += f"""
                 <tr class="sahithi-row">
                     <td class="subject-cell"><strong>{email['subject']}</strong></td>
                     <td class="sender-cell"><strong>{email['sender']}</strong></td>
                     <td class="email-cell">{email['sender_email']}</td>
                     <td class="date-cell">{email['received']}</td>
-                    <td class="preview-cell">{email['preview']}</td>
+                    {preview_cell}
                     <td>{open_link}</td>
                 </tr>
                 """
@@ -506,18 +708,18 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                     <th>Received</th>
                     <th>Preview</th>
                     <th>Open Email</th>
-                </tr>
-            """
-            for email in important_inbox:
+                </tr>            """
+            for i, email in enumerate(important_inbox):
                 row_class = "sahithi-row" if email.get('is_from_sahithi') else ""
                 open_link = f'<a href="{email["nav_link"]}" target="_blank" class="email-link">Open Email</a>' if email.get("nav_link") else "N/A"
+                preview_cell = create_preview_cell(email, f"inbox-{i}")
                 html_report += f"""
                 <tr class="{row_class}">
                     <td class="subject-cell">{email['subject']}</td>
                     <td class="sender-cell">{email['sender']}</td>
                     <td class="email-cell">{email['sender_email']}</td>
                     <td class="date-cell">{email['received']}</td>
-                    <td class="preview-cell">{email['preview']}</td>
+                    {preview_cell}
                     <td>{open_link}</td>
                 </tr>
                 """
@@ -535,15 +737,15 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                     <th>Recipients</th>
                     <th>Sent Date</th>
                     <th>Preview</th>
-                </tr>
-            """
-            for email in old_sent_emails:
+                </tr>            """
+            for i, email in enumerate(old_sent_emails):
+                preview_cell = create_preview_cell(email, f"sent-{i}")
                 html_report += f"""
                 <tr>
-                    <td>{email['subject']}</td>
-                    <td>{email['recipients']}</td>
-                    <td>{email['sent']}</td>
-                    <td>{email['preview']}</td>
+                    <td class="subject-cell">{email['subject']}</td>
+                    <td class="sender-cell">{email['recipients']}</td>
+                    <td class="date-cell">{email['sent']}</td>
+                    {preview_cell}
                 </tr>
                 """
             html_report += "</table>"
